@@ -8,6 +8,7 @@ from nxdrive.logging_config import get_logger
 from nxdrive.client.common import LOCALLY_EDITED_FOLDER_NAME, UNACCESSIBLE_HASH
 from nxdrive.client.common import NotFound
 from nxdrive.client.common import safe_filename
+from nxdrive.osi import AbstractOSIntegration
 from nxdrive.engine.activity import Action
 from nxdrive.utils import current_milli_time, is_office_temp_file
 from PyQt4.QtCore import pyqtSignal
@@ -174,6 +175,16 @@ class Processor(EngineWorker):
                     if doc_pair.pair_state == 'synchronized':
                         self._handle_readonly(local_client, doc_pair)
                     continue
+                if AbstractOSIntegration.is_mac() and local_client.exists(doc_pair.local_path):
+                    try:
+                        finder_info = local_client.get_remote_id(doc_pair.local_path, "com.apple.FinderInfo")
+                        if finder_info is not None and 'brokMACS' in finder_info:
+                            log.trace("Skip as pair is in use by Finder: %r", doc_pair)
+                            self._postpone_pair(doc_pair, 'Finder using file', interval=3)
+                            self._current_item = self._get_item()
+                            continue
+                    except IOError:
+                        pass
                 # TODO Update as the server dont take hash to avoid conflict yet
                 if (doc_pair.pair_state.startswith("locally")
                         and doc_pair.remote_ref is not None):
@@ -202,6 +213,7 @@ class Processor(EngineWorker):
                     self._handle_no_parent(doc_pair, local_client, remote_client)
                     self._current_item = self._get_item()
                     continue
+
                 self._current_metrics = dict()
                 handler_name = '_synchronize_' + doc_pair.pair_state
                 self._action = Action(handler_name)
@@ -348,11 +360,11 @@ class Processor(EngineWorker):
         # TODO Select the only states that is not a collection
         return self._dao.get_normal_state_from_remote(ref)
 
-    def _postpone_pair(self, doc_pair, reason=''):
+    def _postpone_pair(self, doc_pair, reason='', interval=None):
         # Wait 60s for it
         log.trace("Postpone creation of local file(%s): %r", reason, doc_pair)
         doc_pair.error_count = 1
-        self._engine.get_queue_manager().push_error(doc_pair, exception=None)
+        self._engine.get_queue_manager().push_error(doc_pair, exception=None, interval=interval)
 
     def _synchronize_locally_created(self, doc_pair, local_client, remote_client):
         name = os.path.basename(doc_pair.local_path)
@@ -450,11 +462,21 @@ class Processor(EngineWorker):
                 remote_ref = fs_item_info.uid
                 self._dao.update_last_transfer(doc_pair.id, "upload")
                 self._update_speed_metrics()
+            remote_id_done = False
+            # Set as soon as possible the remote_id as update_remote_state can crash with InterfaceError
+            # NXDRIVE-599
+            try:
+                pass
+                #local_client.set_remote_id(doc_pair.local_path, remote_ref)
+                #remote_id_done = True
+            except (NotFound, IOError, OSError):
+                pass
             self._dao.update_remote_state(doc_pair, fs_item_info, remote_parent_path=remote_parent_path,
                                           versionned=False)
             log.trace("Put remote_ref in %s", remote_ref)
             try:
-                local_client.set_remote_id(doc_pair.local_path, remote_ref)
+                if not remote_id_done:
+                    local_client.set_remote_id(doc_pair.local_path, remote_ref)
             except (NotFound, IOError, OSError):
                 new_pair = self._dao.get_state_from_id(doc_pair.id)
                 # File has been moved during creation
