@@ -22,17 +22,23 @@ DEFAULT_DELAY = 10
 class BlacklistItem(object):
 
     def __init__(self, item_id, item, next_try=DEFAULT_DELAY, count=1):
-        self._count = count
         self._next_try = None
         self._item = item
         self._item_id = item_id
-        self._interval = next_try
 
-        next_interval = self._interval * 2 ** (self._count - 1)
-        # add a random number between -20% and +20% of the next_try value
-        limit = int(math.ceil(next_interval * OFFSET_PERCENT/ 100))
-        offset = random.randint(-limit, limit)
-        self._next_interval = next_interval + offset
+        if count:
+            self._count = count
+            self._interval = next_try
+            # use exponential backoff, based on the number of times it was queued (number of times in error)
+            next_interval = self._interval * 2 ** (self._count - 1)
+            # add a random number between -20% and +20% of the next_try value
+            limit = int(math.ceil(next_interval * OFFSET_PERCENT / 100))
+            offset = random.randint(-limit, limit)
+            self._next_interval = next_interval + offset
+        else:
+            # use a specific interval for next retry
+            # exponential backoff may resume after this
+            self._next_interval = next_try
         self._next_try = self._next_interval + int(time.time())
 
     def check(self, cur_time=None):
@@ -71,8 +77,14 @@ class BlacklistQueue(object):
         self._lock = RLock()
         self._delay = delay
 
-    def push(self, id_obj, obj, count=1):
-        item = BlacklistItem(item_id=id_obj, item=obj, next_try=self._delay, count=count)
+    def push(self, id_obj, obj, count=1, interval=None):
+        # count and interval are mutually exclusive
+        if interval:
+            next_try = interval
+            count = None
+        else:
+            next_try = self._delay
+        item = BlacklistItem(item_id=id_obj, item=obj, next_try=next_try, count=count)
         self._lock.acquire()
         try:
             self._queue[item.get_id()] = item
