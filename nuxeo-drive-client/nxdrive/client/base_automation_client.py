@@ -1202,6 +1202,7 @@ class BaseAutomationClient(BaseClient):
                   url, headers, cookies, file_path)
         req = urllib2.Request(url, data, headers)
         try:
+            log.trace("Uploading file %s with timeout %d", file_path, self.blob_timeout)
             resp = self.streaming_opener.open(req, timeout=self.blob_timeout)
         except KeyError:
             log.trace('KeyError exception: %s', sys.exc_traceback.tb_lineno)

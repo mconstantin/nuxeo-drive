@@ -760,12 +760,13 @@ class Engine(QObject):
                 raise e
         nxclient = None
         if check_credential:
+            self._blob_timeout = self._get_blob_timeout()
             nxclient = self.remote_doc_client_factory(
                 self._server_url, self._remote_user, self._manager.device_id,
                 self._manager.get_version(), proxies=self._manager.proxies,
                 proxy_exceptions=self._manager.proxy_exceptions,
                 password=self._remote_password, token=self._remote_token,
-                timeout=self._handshake_timeout)
+                timeout=self._handshake_timeout, blob_timeout=self._blob_timeout)
             if self._remote_token is None:
                 self._remote_token = nxclient.request_token()
         if self._remote_token is not None:
@@ -884,6 +885,14 @@ class Engine(QObject):
         self._dao.synchronize_state(row)
         # The root should also be sync
 
+    def _get_blob_timeout(self):
+        blob_timeout = self._dao.get_config("blob_timeout")
+        if blob_timeout is None:
+            manager_metrics = self._manager.get_metrics()
+            blob_timeout = manager_metrics["blob_timeout"]
+            self._dao.update_config("blob_timeout", blob_timeout)
+        return int(blob_timeout)
+
     def suspend_client(self, reason):
         if self.is_paused() or self._stopped:
             raise ThreadInterrupt
@@ -921,6 +930,7 @@ class Engine(QObject):
         cache_key = (self._manager.device_id, filtered)
         remote_client = cache.get(cache_key)
         if remote_client is None:
+            self._blob_timeout = self._get_blob_timeout()
             if filtered:
                 remote_client = self.remote_filtered_fs_client_factory(
                         self._server_url, self._remote_user,
@@ -928,7 +938,7 @@ class Engine(QObject):
                         proxies=self._manager.proxies,
                         proxy_exceptions=self._manager.proxy_exceptions,
                         password=self._remote_password,
-                        timeout=self.timeout, cookie_jar=self.cookie_jar,
+                        timeout=self.timeout,  blob_timeout=self._blob_timeout, cookie_jar=self.cookie_jar,
                         token=self._remote_token, check_suspended=self.suspend_client)
             else:
                 remote_client = self.remote_fs_client_factory(
@@ -937,7 +947,7 @@ class Engine(QObject):
                         proxies=self._manager.proxies,
                         proxy_exceptions=self._manager.proxy_exceptions,
                         password=self._remote_password,
-                        timeout=self.timeout, cookie_jar=self.cookie_jar,
+                        timeout=self.timeout,  blob_timeout=self._blob_timeout, cookie_jar=self.cookie_jar,
                         token=self._remote_token, check_suspended=self.suspend_client)
             cache[cache_key] = remote_client
         return remote_client
@@ -949,6 +959,7 @@ class Engine(QObject):
         cache_key = (self._manager.device_id, 'remote_doc')
         remote_client = cache.get(cache_key)
         if remote_client is None:
+            self._blob_timeout = self._get_blob_timeout()
             remote_client = self.remote_doc_client_factory(
                 self._server_url, self._remote_user,
                 self._manager.device_id, self.version,
@@ -956,7 +967,7 @@ class Engine(QObject):
                 proxy_exceptions=self._manager.proxy_exceptions,
                 password=self._remote_password, token=self._remote_token,
                 repository=repository, base_folder=base_folder,
-                timeout=self._handshake_timeout, cookie_jar=self.cookie_jar, check_suspended=self.suspend_client)
+                timeout=self._handshake_timeout, blob_timeout=self._blob_timeout, cookie_jar=self.cookie_jar, check_suspended=self.suspend_client)
             cache[cache_key] = remote_client
         return remote_client
 
