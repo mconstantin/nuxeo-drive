@@ -4,6 +4,7 @@ import sys
 import base64
 import json
 import urllib2
+import httplib
 import random
 import time
 import os
@@ -11,7 +12,8 @@ import hashlib
 import tempfile
 import itertools
 from urllib import urlencode
-from poster.streaminghttp import get_handlers
+from poster.streaminghttp import StreamingHTTPConnection, StreamingHTTPHandler, StreamingHTTPSHandler, \
+    StreamingHTTPRedirectHandler, StreamingHTTPSConnection
 from nxdrive.logging_config import get_logger
 from nxdrive.client.common import BaseClient
 from nxdrive.client.common import DEFAULT_REPOSITORY_NAME
@@ -1695,3 +1697,40 @@ class BaseAutomationClient(BaseClient):
         uploaded_size = BaseAutomationClient.upload_stats.get_current_size()
         log.trace("%s upload instant rate: %5.1f KB/s, upload size: %d, uploaded %d of %d", identifier,
                   BaseAutomationClient.upload_stats.get_instant_rate(), size, uploaded_size, total_size)
+
+
+def get_handlers():
+    handlers = [StreamingNoWaitHTTPHandler, StreamingHTTPRedirectHandler]
+    if hasattr(httplib, "HTTPS"):
+        handlers.append(StreamingNoWaitHTTPSHandler)
+    return handlers
+
+
+class _LowLevelStreamingConnectionMixin:
+    """
+    Low-level connection to override socket options
+    """
+    def connect(self):
+        httplib.HTTPConnection.connect(self)
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+
+class LowLevelStreamingHTTPConnection(_LowLevelStreamingConnectionMixin, StreamingHTTPConnection):
+    """Subclass of `httplib.HTTPConnection` that overrides the `send()` method
+    to support iterable body objects"""
+
+
+class StreamingNoWaitHTTPHandler(StreamingHTTPHandler):
+    def http_open(self, req):
+        return self.do_open(LowLevelStreamingHTTPConnection, req)
+
+
+if hasattr(httplib, 'HTTPS'):
+    class LowLevelStreamingHTTPSConnection(_LowLevelStreamingConnectionMixin, StreamingHTTPSConnection):
+        """Subclass of `httplib.HTTSConnection` that overrides the `send()`
+        method to support iterable body objects"""
+
+
+    class StreamingNoWaitHTTPSHandler(StreamingHTTPSHandler):
+        def https_open(self, req):
+            return self.do_open(LowLevelStreamingHTTPSConnection, req)
