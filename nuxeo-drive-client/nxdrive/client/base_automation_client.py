@@ -54,6 +54,8 @@ NO_LIMIT = -1
 
 DM_READ_TIMEOUT = 20000  # 20 sec
 DM_UPLOAD_LATENCY = 500 #msec
+SEND_BUFFER_SIZE = 16384
+
 
 FILE_BUFFER_SIZES = {
     LESS_THAN_1000KBS: FILE_BUFFER_SIZE_WITH_RATE_LIMIT,
@@ -1713,6 +1715,7 @@ class _LowLevelStreamingConnectionMixin:
     def connect(self):
         httplib.HTTPConnection.connect(self)
         self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, SEND_BUFFER_SIZE)
 
 
 class LowLevelStreamingHTTPConnection(_LowLevelStreamingConnectionMixin, StreamingHTTPConnection):
