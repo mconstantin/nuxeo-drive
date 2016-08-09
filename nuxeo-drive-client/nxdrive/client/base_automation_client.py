@@ -1710,19 +1710,14 @@ def get_handlers():
     return handlers
 
 
-class _LowLevelStreamingConnectionMixin:
-    """
-    Low-level connection to override socket options
-    """
+class LowLevelStreamingHTTPConnection(StreamingHTTPConnection):
+    """Subclass of `httplib.HTTPConnection` that overrides the `send()` method
+    to support iterable body objects"""
+
     def connect(self):
         httplib.HTTPConnection.connect(self)
         self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, SEND_BUFFER_SIZE)
-
-
-class LowLevelStreamingHTTPConnection(_LowLevelStreamingConnectionMixin, StreamingHTTPConnection):
-    """Subclass of `httplib.HTTPConnection` that overrides the `send()` method
-    to support iterable body objects"""
 
 
 class StreamingNoWaitHTTPHandler(StreamingHTTPHandler):
@@ -1731,9 +1726,14 @@ class StreamingNoWaitHTTPHandler(StreamingHTTPHandler):
 
 
 if hasattr(httplib, 'HTTPS'):
-    class LowLevelStreamingHTTPSConnection(_LowLevelStreamingConnectionMixin, StreamingHTTPSConnection):
+    class LowLevelStreamingHTTPSConnection(StreamingHTTPSConnection):
         """Subclass of `httplib.HTTSConnection` that overrides the `send()`
         method to support iterable body objects"""
+
+        def connect(self):
+            httplib.HTTPSConnection.connect(self)
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, SEND_BUFFER_SIZE)
 
 
     class StreamingNoWaitHTTPSHandler(StreamingHTTPSHandler):
