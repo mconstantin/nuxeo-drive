@@ -1716,7 +1716,6 @@ class LowLevelStreamingHTTPConnection(StreamingHTTPConnection):
 
     def connect(self):
         httplib.HTTPConnection.connect(self)
-        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, SEND_BUFFER_SIZE)
 
 
@@ -1732,7 +1731,6 @@ if hasattr(httplib, 'HTTPS'):
 
         def connect(self):
             httplib.HTTPSConnection.connect(self)
-            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, SEND_BUFFER_SIZE)
 
 
