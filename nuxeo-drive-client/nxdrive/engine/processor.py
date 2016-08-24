@@ -143,9 +143,13 @@ class Processor(EngineWorker):
 
     def _execute(self):
         self._current_metrics = dict()
-        self._current_item = self._get_item()
         soft_lock = None
-        while self._continue and self._current_item is not None:
+        while self._continue:
+            self._current_item = self._get_item()
+            log.trace("processor %s current item: %s" % (self.get_name(), self._current_item))
+            if self._current_item is None:
+                break
+
             # Take client every time as it is cached in engine
             local_client = self._engine.get_local_client()
             remote_client = self._engine.get_remote_client()
@@ -157,12 +161,10 @@ class Processor(EngineWorker):
             except:
                 log.trace("Cannot acquire state for: %r", self._current_item)
                 self._engine.get_queue_manager().push(self._current_item)
-                self._current_item = self._get_item()
                 continue
             try:
                 if doc_pair is None:
                     log.trace("Didn't acquire state, dropping %r", self._current_item)
-                    self._current_item = self._get_item()
                     continue
                 log.debug('Executing processor on %r(%d)', doc_pair, doc_pair.version)
                 self._current_doc_pair = doc_pair
@@ -172,7 +174,6 @@ class Processor(EngineWorker):
                     or doc_pair.pair_state is None
                     or doc_pair.pair_state.startswith('parent_')):
                     log.trace("Skip as pair is in non-processable state: %r", doc_pair)
-                    self._current_item = self._get_item()
                     if doc_pair.pair_state == 'synchronized':
                         self._handle_readonly(local_client, doc_pair)
                     continue
@@ -186,11 +187,9 @@ class Processor(EngineWorker):
                         self._refresh_remote(doc_pair, remote_client, remote_info)
                         # Can run into conflict
                         if doc_pair.pair_state == 'conflicted':
-                            self._current_item = self._get_item()
                             continue
                         doc_pair = self._dao.get_state_from_id(doc_pair.id)
                         if doc_pair is None:
-                            self._current_item = self._get_item()
                             continue
                     except NotFound:
                         doc_pair.remote_ref = None
@@ -202,7 +201,6 @@ class Processor(EngineWorker):
                         self._dao.remove_state(doc_pair)
                         continue
                     self._handle_no_parent(doc_pair, local_client, remote_client)
-                    self._current_item = self._get_item()
                     continue
                 self._current_metrics = dict()
                 handler_name = '_synchronize_' + doc_pair.pair_state
@@ -212,7 +210,6 @@ class Processor(EngineWorker):
                     log.debug("Unhandled pair_state: %r for %r",
                                        doc_pair.pair_state, doc_pair)
                     self.increase_error(doc_pair, "ILLEGAL_STATE")
-                    self._current_item = self._get_item()
                     continue
                 else:
                     self._current_metrics = dict()
@@ -239,7 +236,6 @@ class Processor(EngineWorker):
                     except Exception as e:
                         log.exception(e)
                         self.increase_error(doc_pair, "SYNC HANDLER: %s" % handler_name, exception=e)
-                        self._current_item = self._get_item()
                         continue
             except ThreadInterrupt:
                 self._engine.get_queue_manager().push(doc_pair)
@@ -253,7 +249,7 @@ class Processor(EngineWorker):
                     self._unlock_soft_path(soft_lock)
                 self._dao.release_state(self._thread_id)
             self._interact()
-            self._current_item = self._get_item()
+
         log.trace('%s processor terminated' if not self._continue else '%s processor finished, queue is empty',
                   self.get_name())
 
