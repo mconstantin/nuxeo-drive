@@ -24,6 +24,7 @@ from nxdrive.utils import TOKEN_PERMISSION
 from nxdrive.utils import guess_mime_type
 from nxdrive.utils import guess_digest_algorithm
 from nxdrive.utils import force_decode
+from nxdrive.engine.workers import ThreadInterrupt
 from urllib2 import ProxyHandler, URLError
 from urlparse import urlparse
 import socket
@@ -1211,12 +1212,15 @@ class BaseAutomationClient(BaseClient):
         log.trace("Calling %s with headers %r and cookies %r for file %s",
                   url, headers, cookies, file_path)
         req = urllib2.Request(url, data, headers)
+
         try:
             resp = self.streaming_opener.open(req, timeout=self.blob_timeout)
         except KeyError:
             log.trace('KeyError exception: %s', sys.exc_traceback.tb_lineno)
         except URLError as e:
             raise UploadException(str(e))
+        except ThreadInterrupt:
+            raise
         except Exception as e:
             log_details = self._log_details(e) or e
             log.trace("[BaseAutomationClient.upload] %s exception: %s", type(e).__name__, str(log_details))
