@@ -408,8 +408,9 @@ class Processor(EngineWorker):
                     doc_pair = self._dao.get_state_from_id(doc_pair.id)
                     self._synchronize_locally_modified(doc_pair, local_client, remote_client)
                     return
+                log.trace("Compare parents: %r | %r", info.parent_uid, parent_pair.remote_ref)
                 # Document exists on the server
-                if info.parent_uid == parent_pair.remote_ref:
+                if parent_pair.remote_ref is not None and parent_pair.remote_ref.endswith(info.parent_uid):
                     log.warning("Document is already on the server should not create: %r | %r", doc_pair, info)
                     self._dao.synchronize_state(doc_pair)
                     return
@@ -448,11 +449,20 @@ class Processor(EngineWorker):
                 remote_ref = fs_item_info.uid
                 self._dao.update_last_transfer(doc_pair.id, "upload")
                 self._update_speed_metrics()
+            remote_id_done = False
+            # Set as soon as possible the remote_id as update_remote_state can crash with InterfaceError
+            # NXDRIVE-599
+            try:
+                local_client.set_remote_id(doc_pair.local_path, remote_ref)
+                remote_id_done = True
+            except (NotFound, IOError, OSError):
+                  pass
             self._dao.update_remote_state(doc_pair, fs_item_info, remote_parent_path=remote_parent_path,
                                           versionned=False)
             log.trace("Put remote_ref in %s", remote_ref)
             try:
-                local_client.set_remote_id(doc_pair.local_path, remote_ref)
+                if not remote_id_done:
+                    local_client.set_remote_id(doc_pair.local_path, remote_ref)
             except (NotFound, IOError, OSError):
                 new_pair = self._dao.get_state_from_id(doc_pair.id)
                 # File has been moved during creation

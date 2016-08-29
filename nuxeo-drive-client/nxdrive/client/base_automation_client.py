@@ -31,7 +31,6 @@ import socket
 import threading
 import math
 from collections import defaultdict
-from nxdrive.engine.workers import ThreadInterrupt
 
 
 log = None
