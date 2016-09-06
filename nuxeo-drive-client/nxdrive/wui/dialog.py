@@ -16,14 +16,16 @@ import uuid
 import urllib2
 import json
 import sys
-import time
 import datetime
 import calendar
 from nxdrive.engine.engine import Engine
 from nxdrive.notification import Notification
 from nxdrive.engine.workers import Worker
 from nxdrive.engine.dao.sqlite import StateRow
-from dateutil.tz import tzlocal
+from nxdrive.wui.schema import ServerBindingSettingsSchema, ActionSchema, NotificationSchema, StateSchema, \
+    WorkerSchema, EngineSchema
+
+
 log = get_logger(__name__)
 
 
@@ -105,29 +107,8 @@ class WebDriveApi(QtCore.QObject):
         self._dialog = dlg
 
     def _export_engine(self, engine):
-        result = dict()
-        if engine is None:
-            return result
-        result["uid"] = engine._uid
-        result["type"] = engine._type
-        result["name"] = engine._name
-        result["offline"] = engine.is_offline()
-        result["metrics"] = engine.get_metrics()
-        result["started"] = engine.is_started()
-        result["syncing"] = engine.is_syncing()
-        result["paused"] = engine.is_paused()
-        result["local_folder"] = engine._local_folder
-        result["queue"] = engine.get_queue_manager().get_metrics()
-        # TODO Make it more generic
-        bind = engine.get_binder()
-        result["web_authentication"] = bind.web_authentication
-        result["server_url"] = bind.server_url
-        result["username"] = bind.username
-        result["need_password_update"] = bind.pwd_update_required
-        result["initialized"] = bind.initialized
-        result["server_version"] = bind.server_version
-        result["threads"] = self._get_threads(engine)
-        return result
+        schema = EngineSchema()
+        return schema.dump(engine).data
 
     def get_date_from_sqlite(self, d):
         if d is None:
@@ -144,67 +125,16 @@ class WebDriveApi(QtCore.QObject):
         return int(calendar.timegm(self.get_date_from_sqlite(d).timetuple()))
 
     def _export_state(self, state):
-        if state is None:
-            return None
-        result = dict()
-        # Direction
-        result["state"] = state.pair_state
-        # Last sync in sec
-        try:
-            current_time = int(time.time())
-            date_time = self.get_date_from_sqlite(state.last_sync_date)
-            sync_time = self.get_timestamp_from_date(date_time)
-            if state.last_local_updated > state.last_remote_updated:
-                result["last_sync_direction"] = "download"
-            else:
-                result["last_sync_direction"] = "upload"
-            result["last_sync"] = current_time - sync_time
-            if date_time == 0:
-                result["last_sync_date"] = ""
-            else:
-                # As date_time is in UTC
-                result["last_sync_date"] = Translator.format_datetime(date_time + tzlocal._dst_offset)
-        except Exception as e:
-            log.exception(e)
-        result["name"] = state.local_name
-        if state.local_name is None:
-            result["name"] = state.remote_name
-        result["remote_name"] = state.remote_name
-        result["last_error"] = state.last_error
-        result["local_path"] = state.local_path
-        result["local_parent_path"] = state.local_parent_path
-        result["remote_ref"] = state.remote_ref
-        result["folderish"] = state.folderish
-        result["last_transfer"] = state.last_transfer
-        if result["last_transfer"] is None:
-            result["last_transfer"] = result["last_sync_direction"]
-        result["id"] = state.id
-        return result
+        schema = StateSchema()
+        return schema.dump(state).data
 
     def _export_action(self, action):
-        result = dict()
-        result["name"] = action.type
-        percent = action.get_percent()
-        if percent:
-            result["percent"] = percent
-        if isinstance(action, FileAction):
-            result["size"] = action.size
-            result["filename"] = action.filename
-            result["filepath"] = action.filepath
-        return result
+        schema = ActionSchema()
+        return schema.dump(action).data
 
     def _export_worker(self, worker):
-        result = dict()
-        action = worker.get_action()
-        if action is None:
-            result["action"] = None
-        else:
-            result["action"] = self._export_action(action)
-        result["thread_id"] = worker._thread_id
-        result["name"] = worker._name
-        result["paused"] = worker.is_paused()
-        result["started"] = worker.is_started()
-        return result
+        schema = WorkerSchema()
+        return schema.dump(worker).data
 
     def _get_threads(self, engine):
         result = []
@@ -354,16 +284,8 @@ class WebDriveApi(QtCore.QObject):
         return ""
 
     def _export_notification(self, notif):
-        result = dict()
-        result["level"] = notif.get_level()
-        result["uid"] = notif.get_uid()
-        result["title"] = notif.get_title()
-        result["description"] = notif.get_description()
-        result["discardable"] = notif.is_discardable()
-        result["discard"] = notif.is_discard()
-        result["systray"] = notif.is_systray()
-        result["replacements"] = notif.get_replacements()
-        return result
+        schema = NotificationSchema()
+        return schema.dump(notif).data
 
     def _export_notifications(self, notifs):
         result = []
