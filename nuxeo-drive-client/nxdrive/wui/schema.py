@@ -55,8 +55,7 @@ class WorkerSchema(Schema):
     name = fields.Str(attribute='_name')
     paused = fields.Function(lambda obj: obj.is_paused())
     started = fields.Function(lambda obj: obj.is_started())
-    # action = fields.Method('_get_action')
-    action = fields.Nested(ActionSchema, attribute='_action')
+    action = fields.Nested(ActionSchema)
 
     @post_dump(pass_many=False)
     def remove_unneccessary_fields(self, data):
@@ -83,14 +82,14 @@ class StateSchema(Schema):
     local_parent_path = fields.Str()
     remote_ref = fields.Str()
     folderish = fields.Boolean()
-    last_transfer = fields.DateTime()
+    last_transfer = fields.Date()
     id = fields.Str()
 
     def _get_date_from_sqlite(self, d):
         if d is None:
             return 0
         format_date = "%Y-%m-%d %H:%M:%S"
-        return datetime.datetime.strptime(str(d.split(".")[0]), format_date)
+        return datetime.strptime(str(d.split(".")[0]), format_date)
 
     def _get_timestamp_from_date(self, d):
         if d == 0:
@@ -109,6 +108,11 @@ class StateSchema(Schema):
     def get_last_sync_date(self, state):
         date_time = self._get_date_from_sqlite(state.last_sync_date)
         return Translator.format_datetime(date_time + tzlocal._dst_offset) if date_time != 0 else ""
+
+    @post_dump(pass_many=False)
+    def update_last_transfer(self, data):
+        if "last_transfer" not in data or data["last_transfer"] is None:
+            data["last_transfer"] = data["last_sync_direction"]
 
     def export(self, state):
         return self.dump(state).data
@@ -146,15 +150,7 @@ class EngineSchema(Schema):
     need_password_update = fields.Function(lambda obj: obj.get_binder().pwd_update_required)
     initialized = fields.Function(lambda obj: obj.get_binder().initialized)
     server_version = fields.Function(lambda obj: obj.get_binder().server_version)
-    threads = fields.Method('_get_threads')
-    # threads = fields.Nested(WorkerSchema, attribute='_threads', many=True)
-
-    def _get_threads(self, engine):
-        result = []
-        schema = WorkerSchema()
-        for thread in engine.get_threads():
-            result.append(schema.export(thread.worker))
-        return result
+    threads = fields.Nested(WorkerSchema, many=True)
 
     def export(self, engine):
         return self.dump(engine).data
