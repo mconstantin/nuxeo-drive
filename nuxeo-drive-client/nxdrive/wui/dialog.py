@@ -136,6 +136,10 @@ class WebDriveApi(QtCore.QObject):
         schema = WorkerSchema()
         return schema.dump(worker).data
 
+    @property
+    def threads(self):
+        return self._get_threads()
+
     def _get_threads(self, engine):
         result = []
         for thread in engine.get_threads():

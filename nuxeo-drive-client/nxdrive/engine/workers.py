@@ -111,6 +111,10 @@ class Worker(QObject):
     def _update_action(self, action):
         self.actionUpdate.emit(action)
 
+    @property
+    def action(self):
+        return self.get_action()
+
     def get_action(self):
         action = Action.get_current_action(self._thread_id)
         if action is None:
