@@ -470,6 +470,10 @@ class Engine(QObject):
                         initialized=True,
                         pwd_update_required=self.has_invalid_credentials())
 
+    @property
+    def binder(self):
+        return self.get_binder()
+
     def get_local_folder(self):
         return self._local_folder
 

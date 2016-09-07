@@ -1,4 +1,4 @@
-from marshmallow import Schema, fields, post_dump, pprint
+from marshmallow import Schema, fields, post_dump
 from nxdrive.wui.translator import Translator
 from dateutil.tz import tzlocal
 from datetime import datetime
@@ -7,12 +7,12 @@ import time
 
 
 class ServerBindingSettingsSchema(Schema):
-    web_authentication = fields.Boolean
-    server_url = fields.Str
-    username = fields.Str
+    web_authentication = fields.Boolean()
+    server_url = fields.Str()
+    username = fields.Str()
     need_password_update = fields.Boolean(attribute='pwd_update_required')
-    initialized = fields.Boolean
-    server_version = fields.Str
+    initialized = fields.Boolean()
+    server_version = fields.Str()
 
 
 class ActionSchema(Schema):
@@ -28,26 +28,12 @@ class ActionSchema(Schema):
     @post_dump(pass_many=False)
     def remove_unneccessary_fields(self, data):
         # should it remove all None fields?
-        try:
-            if data["percent"] is None:
-                del data["percent"]
-        except KeyError:
-            pass
-        try:
-            if data["size"] is None:
-                del data["size"]
-        except KeyError:
-            pass
-        try:
-            if data["filename"] is None:
-                del data["filename"]
-        except KeyError:
-            pass
-        try:
-            if data["filepath"] is None:
-                del data["filepath"]
-        except KeyError:
-            pass
+        for key in ["percent", "size", "filename", "filepath"]:
+            try:
+                if data[key] is None:
+                    del data[key]
+            except KeyError:
+                pass
 
 
 class WorkerSchema(Schema):
@@ -143,14 +129,15 @@ class EngineSchema(Schema):
     paused = fields.Function(lambda obj: obj.is_paused())
     local_folder = fields.Str(attribute='_local_folder')
     queue = fields.Function(lambda obj: obj.get_queue_manager().get_metrics())
-
-    web_authentication = fields.Function(lambda obj: obj.get_binder().web_authentication)
-    server_url = fields.Function(lambda obj: obj.get_binder().server_url)
-    username = fields.Function(lambda obj: obj.get_binder().username)
-    need_password_update = fields.Function(lambda obj: obj.get_binder().pwd_update_required)
-    initialized = fields.Function(lambda obj: obj.get_binder().initialized)
-    server_version = fields.Function(lambda obj: obj.get_binder().server_version)
+    binder = fields.Nested(ServerBindingSettingsSchema)
     threads = fields.Nested(WorkerSchema, many=True)
+
+    @post_dump(pass_many=False)
+    def flatten_binder(self, data):
+        # flatten the 'binder' dict from from the data dict
+        for key, value in data["binder"].items():
+            data[key] = value
+        del data["binder"]
 
     def export(self, engine):
         return self.dump(engine).data
