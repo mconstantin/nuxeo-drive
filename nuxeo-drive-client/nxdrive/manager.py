@@ -10,12 +10,19 @@ from urlparse import urlparse
 from PyQt4 import QtCore
 from PyQt4.QtScript import QScriptEngine
 
+from watchdog.events import FileSystemEventHandler, FileModifiedEvent
+from watchdog.observers import Observer
+
 from nxdrive.utils import encrypt
 from nxdrive.utils import decrypt
 from nxdrive.logging_config import get_logger, FILE_HANDLER
 from nxdrive.client.base_automation_client import get_proxies_for_handler
+from nxdrive.client.base_automation_client import BaseAutomationClient
+from nxdrive.client.base_automation_client import get_number_of_processors
 from nxdrive.utils import normalized_path
 from nxdrive.updater import AppUpdater, FakeUpdater
+from nxdrive.utils import get_default_home
+from nxdrive.updater import AppUpdater
 from nxdrive.osi import AbstractOSIntegration
 from nxdrive.commandline import DEFAULT_UPDATE_SITE_URL
 from nxdrive import __version__
@@ -23,12 +30,12 @@ from nxdrive.utils import ENCODING, OSX_SUFFIX
 
 log = get_logger(__name__)
 
-
 try:
     # Set the cffi tmp path to lib for xattr
     if sys.platform == 'darwin' or sys.platform.startswith('linux') and hasattr(sys, 'frozen'):
         from cffi.verifier import set_tmpdir
         import nxdrive
+
         nxdrive_path = os.path.dirname(nxdrive.__file__)
         nxdrive_path = os.path.dirname(nxdrive_path)
         nxdrive_path = os.path.dirname(nxdrive_path)
@@ -74,9 +81,9 @@ class ServerBindingSettings(object):
         return ("ServerBindingSettings<web_authentication=%r, server_url=%s, server_version=%s, "
                 "username=%s, local_folder=%s, initialized=%r, "
                 "pwd_update_required=%r>") % (
-                    self.web_authentication, self.server_url, self.server_version, self.username,
-                    self.local_folder, self.initialized,
-                    self.pwd_update_required)
+                   self.web_authentication, self.server_url, self.server_version, self.username,
+                   self.local_folder, self.initialized,
+                   self.pwd_update_required)
 
 
 class ProxySettings(object):
@@ -137,7 +144,7 @@ class ProxySettings(object):
             token = dao.get_config("device_id", None)
         if token is None:
             raise MissingToken("Your token has been revoked,"
-                        " please update your password to acquire a new one.")
+                               " please update your password to acquire a new one.")
         token = token + "_proxy"
         password = encrypt(self.password, token)
         dao.update_config("proxy_password", password)
@@ -171,8 +178,103 @@ class ProxySettings(object):
     def __repr__(self):
         return ("ProxySettings<config=%s, proxy_type=%s, server=%s, port=%s, "
                 "authenticated=%r, username=%s, exceptions=%s>") % (
-                    self.config, self.proxy_type, self.server, self.port,
-                    self.authenticated, self.username, self.exceptions)
+                   self.config, self.proxy_type, self.server, self.port,
+                   self.authenticated, self.username, self.exceptions)
+
+
+class ConfigWatcher(object):
+    @staticmethod
+    def get_config():
+        config_name = 'config.ini'
+        default_home = get_default_home()
+        path = os.path.join(os.path.dirname(sys.executable), config_name)
+        if os.path.exists(path):
+            return path
+        user_ini = os.path.expanduser(os.path.join(default_home, config_name))
+        if os.path.exists(user_ini):
+            return user_ini
+        return None
+
+    config_ini = get_config.__func__()
+
+    class ConfigModifiedEventHandler(FileSystemEventHandler):
+        def on_modified(self, event):
+            if isinstance(event, FileModifiedEvent) and not event.is_directory and \
+                            event.src_path == ConfigWatcher.config_ini:
+
+                import ConfigParser
+                config = ConfigParser.RawConfigParser()
+                config.read(ConfigWatcher.config_ini)
+                try:
+                    new_upload_rate = config.getint(ConfigParser.DEFAULTSECT, 'upload-rate')
+                except ConfigParser.NoOptionError as e:
+                    new_upload_rate = -1
+
+                try:
+                    new_download_rate = config.getint(ConfigParser.DEFAULTSECT, 'download-rate')
+                except ConfigParser.NoOptionError as e:
+                    new_download_rate = -1
+                self.set_rate_limit_changed(new_upload_rate, new_download_rate)
+
+        @staticmethod
+        def set_rate_limit_changed(new_upload_rate, new_download_rate): 
+            try:
+                current_upload_rate = int(Manager.get()._dao.get_config('upload_rate', -1))
+            except ValueError:
+                current_upload_rate = 0
+
+            try:
+                current_download_rate = int(Manager.get()._dao.get_config('download_rate', -1))
+            except ValueError:
+                current_download_rate = 0
+
+            change = not (new_upload_rate == current_upload_rate and new_download_rate == current_download_rate)
+            if not change:
+                return
+
+            slower = new_upload_rate < current_upload_rate or new_download_rate < current_download_rate
+            if slower:
+                # change processors first, then upadate the rate(s)
+                ConfigWatcher.ConfigModifiedEventHandler.change_processors(new_upload_rate, new_download_rate)
+
+            if new_upload_rate != current_upload_rate:
+                BaseAutomationClient.set_upload_rate_limit(new_upload_rate)
+                Manager.get()._dao.update_config('upload_rate', new_upload_rate)
+                log.trace('update upload rate: %s', str(BaseAutomationClient.upload_token_bucket))
+
+            if new_download_rate != current_download_rate:
+                BaseAutomationClient.set_download_rate_limit(new_download_rate)
+                Manager.get()._dao.update_config('download_rate', new_download_rate)
+                log.trace('update download rate: %s', str(BaseAutomationClient.download_token_bucket))
+
+            if change and new_upload_rate > current_upload_rate and new_download_rate > current_download_rate:
+                # changed rate(s) first, then change processors
+                ConfigWatcher.ConfigModifiedEventHandler.change_processors(new_upload_rate, new_download_rate)
+
+        @staticmethod
+        def change_processors(self, upload_rate, download_rate):
+            max_processors = get_number_of_processors(upload_rate, download_rate)
+            for engine in Manager.get().get_engines().values():
+                try:
+                    engine.get_queue_manager().restart(max_processors)
+                    log.trace('update engine %s processors: %d local, %d remote, %d generic',
+                              engine.get_uid(), max_processors[0], max_processors[1], max_processors[2])
+                except Exception as e:
+                    log.error('failed to update engine %s processors: %s', engine.get_uid(), str(e))
+
+    def __init__(self):
+        self.watch = None
+        self.observer = Observer()
+
+    def setup_watchdog(self):
+        if not ConfigWatcher.config_ini:
+            return
+        event_handler = ConfigWatcher.ConfigModifiedEventHandler()
+        self.watch = self.observer.schedule(event_handler, os.path.dirname(ConfigWatcher.config_ini), recursive=False)
+        self.observer.start()
+
+    def unset_watcher(self):
+        self.observer.unschedule(self.watch)
 
 
 class Manager(QtCore.QObject):
@@ -281,6 +383,24 @@ class Manager(QtCore.QObject):
         if self.device_id is None:
             self.generate_device_id()
 
+        # setup the bandwidth rate limits
+        upload_rate = options.upload_rate
+        if upload_rate is None:
+            upload_rate = self._dao.get_config('upload_rate', -1)
+        elif upload_rate != -1:
+            self._dao.update_config('upload_rate', upload_rate)
+        BaseAutomationClient.set_upload_rate_limit(upload_rate)
+        log.debug('upload rate: %s', str(BaseAutomationClient.upload_token_bucket))
+
+        download_rate = options.download_rate
+        if download_rate is None:
+            download_rate = self._dao.get_config('download_rate', -1)
+        elif download_rate != -1:
+            self._dao.update_config('download_rate', download_rate)
+        BaseAutomationClient.set_download_rate_limit(download_rate)
+        self.config_watcher = ConfigWatcher()
+        log.debug('download rate: %s', str(BaseAutomationClient.download_token_bucket))
+
         self.load()
 
         # Create the application update verification thread
@@ -329,7 +449,7 @@ class Manager(QtCore.QObject):
 
     def _update_logger(self, log_level):
         logging.getLogger().setLevel(
-                        min(log_level, logging.getLogger().getEffectiveLevel()))
+            min(log_level, logging.getLogger().getEffectiveLevel()))
         handler = self._get_file_log_handler()
         if handler:
             handler.setLevel(log_level)
@@ -574,6 +694,8 @@ class Manager(QtCore.QObject):
             if engine.is_started():
                 log.debug("Stop engine %s", uid)
                 engine.stop()
+        # stop watching config.ini
+        self.config_watcher.unset_watcher()
         self.stopped.emit()
 
     def start(self, euid=None):
@@ -591,6 +713,8 @@ class Manager(QtCore.QObject):
         log.debug("Emitting started")
         # Check only if manager is started
         self._handle_os()
+        # start watching config.ini
+        self.config_watcher.setup_watchdog()
         self.started.emit()
 
     def load(self):
@@ -604,8 +728,11 @@ class Manager(QtCore.QObject):
                 if not engine.engine in in_error:
                     in_error[engine.engine] = True
                     self.engineNotFound.emit(engine)
-            self._engines[engine.uid] = self._engine_types[engine.engine](self, engine,
-                                                                        remote_watcher_delay=self.remote_watcher_delay)
+            self._engines[engine.uid] = self._engine_types[engine.engine](
+                self, engine,
+                remote_watcher_delay=self.remote_watcher_delay,
+                processors=get_number_of_processors(BaseAutomationClient.get_upload_rate_limit(),
+                                                    BaseAutomationClient.get_download_rate_limit()))
             self._engines[engine.uid].online.connect(self._force_autoupdate)
             self.initEngine.emit(self._engines[engine.uid])
 
@@ -763,8 +890,8 @@ class Manager(QtCore.QObject):
         executable = sys.executable
         if "appdata" in executable:
             executable = os.path.join(os.path.dirname(executable),
-                                      "..","..",os.path.basename(
-                                      sys.executable))
+                                      "..", "..", os.path.basename(
+                    sys.executable))
             exe_path = os.path.abspath(executable)
             if os.path.exists(exe_path):
                 log.trace("Returning exe path: %s", exe_path)
@@ -774,7 +901,7 @@ class Manager(QtCore.QObject):
         if nxdrive_path.endswith(OSX_SUFFIX):
             log.trace("Detected OS X frozen app")
             exe_path = nxdrive_path.replace(OSX_SUFFIX, "Contents/MacOS/"
-                                                + self._get_binary_name())
+                                            + self._get_binary_name())
             if os.path.exists(exe_path):
                 log.trace("Returning exe path: %s", exe_path)
                 return exe_path
@@ -817,8 +944,8 @@ class Manager(QtCore.QObject):
             # Try google website
             url = "http://www.google.com"
             opener = urllib2.build_opener(urllib2.ProxyHandler(proxies),
-                                      urllib2.HTTPBasicAuthHandler(),
-                                      urllib2.HTTPHandler)
+                                          urllib2.HTTPBasicAuthHandler(),
+                                          urllib2.HTTPHandler)
             urllib2.install_opener(opener)
             conn = urllib2.urlopen(url)
             conn.read()
@@ -842,7 +969,7 @@ class Manager(QtCore.QObject):
         proxy_settings = (proxy_settings if proxy_settings is not None
                           else self.get_proxy_settings())
         self.proxies, self.proxy_exceptions = get_proxies_for_handler(
-                                                            proxy_settings)
+            proxy_settings)
         self.proxyUpdated.emit(proxy_settings)
 
     def get_proxies(self):
@@ -873,7 +1000,8 @@ class Manager(QtCore.QObject):
     def _get_default_server_type(self):
         return "NXDRIVE"
 
-    def bind_server(self, local_folder, url, username, password, token=None, name=None, start_engine=True, check_credentials=True):
+    def bind_server(self, local_folder, url, username, password, token=None, name=None, start_engine=True,
+                    check_credentials=True):
         from collections import namedtuple
         if name is None:
             name = self._get_engine_name(url)
@@ -935,8 +1063,11 @@ class Manager(QtCore.QObject):
         # TODO Check that engine is not inside another or same position
         engine_def = self._dao.add_engine(engine_type, local_folder, uid, name)
         try:
-            self._engines[uid] = self._engine_types[engine_type](self, engine_def, binder=binder,
-                                                                 remote_watcher_delay=self.remote_watcher_delay)
+            self._engines[uid] = self._engine_types[engine_type](
+                self, engine_def, binder=binder,
+                remote_watcher_delay=self.remote_watcher_delay,
+                processors=get_number_of_processors(BaseAutomationClient.get_upload_rate_limit(),
+                                                    BaseAutomationClient.get_download_rate_limit()))
             self._engine_definitions.append(engine_def)
         except Exception as e:
             log.exception(e)
@@ -951,7 +1082,7 @@ class Manager(QtCore.QObject):
             self._engines[uid].start()
         self.newEngine.emit(self._engines[uid])
         return self._engines[uid]
-        #server_url, username, password
+        # server_url, username, password
         # check the connection to the server by issuing an authentication
         # request
 
@@ -993,10 +1124,10 @@ class Manager(QtCore.QObject):
     def update_version(self, device_config):
         if self.version != device_config.client_version:
             log.info("Detected version upgrade: current version = %s,"
-                      " new version = %s => upgrading current version,"
-                      " yet DB upgrade might be needed.",
-                      device_config.client_version,
-                      self.version)
+                     " new version = %s => upgrading current version,"
+                     " yet DB upgrade might be needed.",
+                     device_config.client_version,
+                     self.version)
             device_config.client_version = self.version
             self.get_session().commit()
             return True
