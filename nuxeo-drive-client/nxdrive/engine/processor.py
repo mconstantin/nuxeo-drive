@@ -160,7 +160,7 @@ class Processor(EngineWorker):
                     self._engine._user_name_resolver.refresh_user(doc_pair.last_remote_modifier)
             except:
                 log.trace("Cannot acquire state for: %r", self._current_item)
-                self._engine.get_queue_manager().push(self._current_item)
+                self._postpone_pair(self._current_item, 'Pair in use')
                 continue
             try:
                 if doc_pair is None:
