@@ -105,19 +105,6 @@ class LocalWatcher(EngineWorker):
             self._watchdog_queue = Queue()
             self._setup_watchdog()
             log.debug("Watchdog setup finished")
-
-            # resync error items CSPII-9080
-            log.trace('Revisiting error list as engine is restarted')
-            error_list = self._dao.get_errors(limit=0)
-            for doc_pair in error_list:
-                log.trace('Putting error item %s back into queue', doc_pair)
-                queueItem = QueueItem(doc_pair.id, doc_pair.folderish, doc_pair.pair_state)
-                self._dao.reset_error(doc_pair)
-                # move it out of error queue otherwise processor won't process it
-                if self._engine.get_queue_manager()._is_on_error(doc_pair.id):
-                    self._engine.get_queue_manager()._on_error_queue.remove(doc_pair.id)
-                self._engine.get_queue_manager().push(queueItem)
-
             self._action = Action("Full local scan")
             self._scan()
             self._end_action()
