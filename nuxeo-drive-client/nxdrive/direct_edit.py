@@ -339,12 +339,12 @@ class DirectEdit(Worker):
     def _handle_queues(self):
         uploaded = False
         # Lock any documents
-        log.trace("DirectEdit handle lock queue");
+        # log.trace("DirectEdit handle lock queue");
         while (not self._lock_queue.empty()):
             try:
                 item = self._lock_queue.get_nowait()
                 ref = item[0]
-                log.trace('Handling DirectEdit lock queue ref: %r', ref)
+                # log.trace('Handling DirectEdit lock queue ref: %r', ref)
             except Empty:
                 break
             uid = ""
@@ -374,17 +374,17 @@ class DirectEdit(Worker):
                 log.debug("Can't %s document '%s': %r", item[1], ref, e, exc_info=True)
                 self.directEditLockError.emit(item[1], os.path.basename(ref), uid)
         # Unqueue any errors
-        log.trace("DirectEdit handle error queue");
+        # log.trace("DirectEdit handle error queue");
         item = self._error_queue.get()
         while (item is not None):
             self._upload_queue.put(item.get())
             item = self._error_queue.get()
         # Handle the upload queue
-        log.trace("DirectEdit handle upload queue");
+        # log.trace("DirectEdit handle upload queue");
         while (not self._upload_queue.empty()):
             try:
                 ref = self._upload_queue.get_nowait()
-                log.trace('Handling DirectEdit queue ref: %r', ref)
+                # log.trace('Handling DirectEdit queue ref: %r', ref)
             except Empty:
                 break
             uid,  engine, remote_client, digest_algorithm, digest = self._extract_edit_info(ref)
@@ -395,15 +395,15 @@ class DirectEdit(Worker):
                 if current_digest == digest:
                     continue
                 start_time = current_milli_time()
-                log.trace("Local digest: %s is different from the recorded one: %s - modification detected for %r",
-                          current_digest, digest, ref)
+                # log.trace("Local digest: %s is different from the recorded one: %s - modification detected for %r",
+                #           current_digest, digest, ref)
                 # TO_REVIEW Should check if server-side blob has changed ?
                 # Update the document - should verify the remote hash - NXDRIVE-187
                 remote_info = remote_client.get_info(uid)
                 if remote_info.digest != digest:
                     # Conflict detect
-                    log.trace("Remote digest: %s is different from the recorded one: %s - conflict detected for %r",
-                              remote_info.digest, digest, ref)
+                    # log.trace("Remote digest: %s is different from the recorded one: %s - conflict detected for %r",
+                    #           remote_info.digest, digest, ref)
                     self.directEditConflict.emit(os.path.basename(ref), ref, remote_info.digest)
                     continue
                 log.debug('Uploading file %s', self._local_client.abspath(ref))
@@ -424,7 +424,7 @@ class DirectEdit(Worker):
         if uploaded:
             log.debug('Emitting directEditUploadCompleted')
             self.directEditUploadCompleted.emit()
-        log.trace("DirectEdit handle watchdog queue");
+        # log.trace("DirectEdit handle watchdog queue");
         while (not self._watchdog_queue.empty()):
             evt = self._watchdog_queue.get()
             self.handle_watchdog_event(evt)
@@ -444,10 +444,10 @@ class DirectEdit(Worker):
             self._end_action()
             # Load the target url if Drive was not launched before
             self.handle_url()
-            log.trace("DirectEdit Entering main loop: continue:%r pause:%r running:%r", self._continue, self._pause, self._running)
+            # log.trace("DirectEdit Entering main loop: continue:%r pause:%r running:%r", self._continue, self._pause, self._running)
             while (1):
                 self._interact()
-                log.trace("DirectEdit post interact: continue:%r pause:%r running:%r", self._continue, self._pause, self._running)
+                # log.trace("DirectEdit post interact: continue:%r pause:%r running:%r", self._continue, self._pause, self._running)
                 try:
                     self._handle_queues()
                 except NotFound:
