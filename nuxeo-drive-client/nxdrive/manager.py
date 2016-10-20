@@ -20,6 +20,7 @@ from nxdrive.osi import AbstractOSIntegration
 from nxdrive.commandline import DEFAULT_UPDATE_SITE_URL
 from nxdrive import __version__
 from nxdrive.utils import ENCODING, OSX_SUFFIX
+from nxdrive.osi.darwin.network_notification import setup_reachability
 
 log = get_logger(__name__)
 
@@ -293,6 +294,9 @@ class Manager(QtCore.QObject):
         self._tracker = None
         if self.get_tracking():
             self._create_tracker()
+
+        # setup notification for reachability events
+        setup_reachability()
 
     def _get_file_log_handler(self):
         # Might store it in global static
