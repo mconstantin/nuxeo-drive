@@ -139,6 +139,27 @@ def get_handler(logger, name):
 
 def get_logger(name):
     logger = logging.getLogger(name)
-    trace = lambda *args, **kwargs: logger.log(TRACE, *args, **kwargs)
+    # trace = lambda *args, **kwargs: logger.log(TRACE, *args, **kwargs)
+
+    def trace(*args, **kwargs):
+        _args = list()
+        for arg in args:
+            if isinstance(arg, dict) and 'X-Authentication-Token' in arg:
+                _arg = arg.copy()
+                _arg['X-Authentication-Token'] = '*' * 16 + arg['X-Authentication-Token'][-4:]
+                _args.append(_arg)
+            else:
+                _args.append(arg)
+        _kwargs = dict()
+        for key, val in kwargs.values():
+            if isinstance(val, dict) and 'X-Authentication-Token' in val:
+                _val = val.copy()
+                _val['X-Authentication-Token'] = '*' * 16 + val['X-Authentication-Token'][-4:]
+                _kwargs[key] = _val
+            else:
+                _kwargs[key] = val
+
+        logger.log(TRACE, *_args, **_kwargs)
+
     setattr(logger, 'trace', trace)
     return logger
