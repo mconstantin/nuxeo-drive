@@ -1,6 +1,7 @@
 """Utilities to log nxdrive operations and failures"""
 
 import logging
+import logging.handers
 from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler, BufferingHandler
 import os
 from copy import copy
@@ -75,6 +76,7 @@ def configure(use_file_handler=False, log_filename=None, file_level='INFO',
 
         # find the minimum level to avoid filtering by the root logger itself:
         root_logger = logging.getLogger()
+        sumo_logger = logging.getLogger("sumologger")
         min_level = min(file_level, console_level)
         root_logger.setLevel(min_level)
 
@@ -88,6 +90,8 @@ def configure(use_file_handler=False, log_filename=None, file_level='INFO',
         # sys.stderr
         console_handler_name = 'console'
         console_handler = get_handler(root_logger, console_handler_name)
+        sumo_handler = get_handler(sumo_logger, 'sumo')
+
         if console_handler is None:
             console_handler = logging.StreamHandler()
             console_handler.set_name(console_handler_name)
@@ -95,8 +99,16 @@ def configure(use_file_handler=False, log_filename=None, file_level='INFO',
             console_handler.setFormatter(formatter)
         console_handler.setLevel(console_level)
 
+        if sumo_handler is None:
+            sumo_handler = logging.StreamHandler()
+            sumo_handler.set_name(console_handler_name)
+            # tell the sumo handler to use this format
+            sumo_handler.setFormatter(formatter)
+        sumo_handler.setLevel('sumo')
+
         # add the console handler to the root logger and all descendants
         root_logger.addHandler(console_handler)
+        root_logger.addHandler(sumo_handler)
 
         # define a Handler for file based log with rotation if needed
         if use_file_handler and log_filename is not None:
@@ -142,3 +154,55 @@ def get_logger(name):
     trace = lambda *args, **kwargs: logger.log(TRACE, *args, **kwargs)
     setattr(logger, 'trace', trace)
     return logger
+
+
+class SumoHTTPHandler(logging.Handler):
+    def __init__(self, url, host="collectors.sumologic.com", name=None, compressed=False):
+        """
+        Similar to HTTPHandler but with some custom Sumo-friendly headers
+        """
+        logging.Handler.__init__(self)
+        self.host = host
+        self.url = url
+        self.name = name
+        self.compressed = compressed
+
+    def emit(self, record):
+        try:
+            import httplib, urllib
+            host = self.host
+            h = httplib.HTTPS(host)
+            url = self.url
+            data = urllib.quote(self.format(record))
+            sep = "?"
+            url = url + "%c%s" % (sep, data)
+            h.putrequest("GET", url)
+            h.putheader("Host", host)
+            if self.compressed:
+                h.putheader("Content-Encoding", "gzip")
+            if self.name:
+                h.putheader("X-Sumo-Name", self.name)
+            h.endheaders()
+            h.getreply()    #can't do anything with the result
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except:
+            self.handleError(record)
+
+#logging config for sumo
+LOGGING = {
+    'version': 1,
+    'handlers': {
+        'sumo':{
+            'level': "TRACE",
+            'class': '__main__.SumoHTTPHandler',
+            'url': '/receiver/v1/.....', #Replace with Sumo Hosted URL
+        }
+    },
+    'loggers': {
+        'sumologger': {
+            'handlers': ['sumo'],
+            'level': 'TRACE'
+        }
+    }
+}
