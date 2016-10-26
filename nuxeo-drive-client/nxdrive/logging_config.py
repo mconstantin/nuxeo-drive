@@ -137,24 +137,48 @@ def get_handler(logger, name):
     return None
 
 
+TRANSFORMS = {
+    'X-Authentication-Token': lambda s: '*' * 16 + s[-4:]
+}
+
+
 def get_logger(name):
     logger = logging.getLogger(name)
-    # trace = lambda *args, **kwargs: logger.log(TRACE, *args, **kwargs)
 
     def trace(*args, **kwargs):
+        from collections import Mapping
         _args = list()
-        for arg in args:
-            if isinstance(arg, dict) and 'X-Authentication-Token' in arg:
-                _arg = arg.copy()
-                _arg['X-Authentication-Token'] = '*' * 16 + arg['X-Authentication-Token'][-4:]
-                _args.append(_arg)
+        _args.append(args[0])
+        for arg in args[1:]:
+            _arg = None
+            if isinstance(arg, Mapping):
+                for (k, v) in arg.items():
+                    if k in TRANSFORMS:
+                        if _arg is None:
+                            # builds a dictionary, which may be different from the original "mapping" type
+                            _arg = dict()
+                        _arg[k] = TRANSFORMS[k](v)
+                    else:
+                        if _arg is not None:
+                            _arg[k] = v
+                if _arg is not None:
+                    _args.append(_arg)
             else:
                 _args.append(arg)
+
         _kwargs = dict()
         for key, val in kwargs.values():
-            if isinstance(val, dict) and 'X-Authentication-Token' in val:
-                _val = val.copy()
-                _val['X-Authentication-Token'] = '*' * 16 + val['X-Authentication-Token'][-4:]
+            _val = None
+            if isinstance(val, Mapping):
+                for (k,v) in val.items():
+                    if k in TRANSFORMS:
+                        if _val is None:
+                            # builds a dictionary, which may be different from the original "mapping" type
+                            _val = dict()
+                        _val[k] = TRANSFORMS[k](v)
+                    else:
+                        if _val is not None:
+                            _val[k] = v
                 _kwargs[key] = _val
             else:
                 _kwargs[key] = val
