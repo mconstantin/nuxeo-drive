@@ -603,7 +603,7 @@ class EngineDAO(ConfigurationDAO):
             except:
                 self.release_processor(thread_id)
                 raise
-        return None
+        raise Exception("Cannot acquire")
 
     def release_state(self, thread_id):
         self.release_processor(thread_id)
