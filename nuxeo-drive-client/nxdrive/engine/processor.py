@@ -40,8 +40,16 @@ class Processor(EngineWorker):
         super(Processor, self).__init__(engine, engine.get_dao(), name=name)
         self._current_item = None
         self._current_doc_pair = None
-        self._get_item = item_getter
+        self.item_getter = item_getter
         self._engine = engine
+    
+    def _get_item(self):
+        '''
+            Get the item only if the current thread can continue. Otherwise return None
+        '''
+        if self.item_getter and self._continue:
+            return self.item_getter()
+        return None
 
     def _unlock_soft_path(self, path):
         log.trace("Soft unlocking: %s", path)
